@@ -86,14 +86,14 @@ class fjm(ILP):
 
         if not found:
             rt = endnote.find('records/record/ref-type')
+            reftype = rt.get('name')
             
             #XXX: Hack to deal with type not recognized by Bibutils... (Assuming that if already in MODS, it is correct...)
-            if rt.get('name') == 'Book':
-                wt = endnote.find('records/record/work-type')
-                if wt.get('name') == 'Working Paper':
-                    rt = wt
-                    
-            reftype = rt.get('name')
+            if reftype == 'Book':
+                wt = endnote.findtext('records/record/work-type/style').strip()
+                if wt == 'Working Paper':
+                    reftype = wt
+
             #4.1.2 and add it to the MODS in the genre (just as child of /mods:mods)
             if reftype is not None:
               reftype_el = etree.Element('genre')
