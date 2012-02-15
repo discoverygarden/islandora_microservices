@@ -35,7 +35,8 @@ class IslandoraListener(ConnectionListener):
         
         # connect to the stomp listener
         try:
-            self.conn = Connection([(host, port)])
+            #TODO:  Get reconnection times from config
+            self.conn = Connection([(host, port)], reconnect_sleep_increase=2.0, reconnect_attempts_max=10)
             self.conn.set_listener('', self)
             self.conn.start()
         except ReconnectFailedException, e:
