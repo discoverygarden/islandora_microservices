@@ -16,7 +16,14 @@ class fjm(ILP):
         logger = self.logger
         logger.debug(message)
         if message['dsid']:
-            if message['dsid'] == 'PDF':
+            if message['dsid'] == 'TIFF':
+                CONV.create_jpeg_derivative(obj, 'TIFF', 'FULL_JPG', label='Derived full-sized JPEG')
+                CONV.create_jpeg_derivative(obj, 'TIFF', 'WEB_JPG', dimensions=(1024, 1024), label='Derived web-sized JPEG')
+                CONV.create_jpeg_derivative(obj, 'TIFF', 'TN', dimensions=(200, 200), label='Derived thumbnail-sized JPEG')
+            elif message['dsid'] == 'FULL_JPG' and 'TIFF' not in obj:
+                CONV.create_jpeg_derivative(obj, 'FULL_JPG', 'WEB_JPG', dimensions=(1024, 1024), label='Derived web-sized JPEG')
+                CONV.create_jpeg_derivative(obj, 'FULL_JPG', 'TN', dimensions=(200, 200), label='Derived thumbnail-sized JPEG')
+            elif message['dsid'] == 'PDF':
                 CONV.create_swf(obj, 'PDF', 'SWF')
                 CONV.create_thumbnail(obj, 'PDF', 'TN')
             elif message['dsid'] == 'JPG':
