@@ -49,7 +49,7 @@ stop () {
 	# check to see if the process is running
 	if pgrep -fx "$LISTENER_LINE" >/dev/null 2>&1; then
 		# use kill -2 to stop JMS.
-		if su --session-command="pkill -fx '$LISTENER_LINE'" $FEDORA_USER &>/dev/null; then
+		if su --session-command="pkill -fx \"$LISTENER_LINE\"" $FEDORA_USER &>/dev/null; then
 			echo -e "                                          [ \033[0;32m OK\033[0;39m""  ]"
                         #su --session-command="rm -f $LOCK_FILE" $FEDORA_USER
 		else
