@@ -35,8 +35,7 @@ class IslandoraListener(ConnectionListener):
         
         # connect to the stomp listener
         try:
-            #TODO:  Get reconnection times from config
-            self.conn = Connection([(host, port)], reconnect_sleep_increase=2.0, reconnect_attempts_max=10)
+            self.conn = Connection([(host, port)])
             self.conn.set_listener('', self)
             self.conn.start()
         except ReconnectFailedException, e:
@@ -98,25 +97,22 @@ class IslandoraListener(ConnectionListener):
     def _process_fedora_message(self, message):
         etree = ElementTree.ElementTree()
         root = ElementTree.XML(message)
-        ds = dict()
+        ds = {}
 
-        NSs = {
-            'atom_ns': "{http://www.w3.org/2005/Atom}",
-            'fedora_ns': "{http://www.fedora.info/definitions/1/0/types/}"
-        }
-
+        ATOM_NS = "{http://www.w3.org/2005/Atom}"
+        FEDORA_NS = "{http://www.fedora.info/definitions/1/0/types/}"
         FEDORA_VERSION = 'info:fedora/fedora-system:def/view#version'
 
-        ds['id'] = root.findtext('%(atom_ns)sid' % NSs)
-        updated = root.findtext('%(atom_ns)supdated' % NSs)
+        ds['id'] = root.find(ATOM_NS+'id').text
+        updated = root.find(ATOM_NS+'updated').text
         ds['updated'] = datetime.strptime(updated, '%Y-%m-%dT%H:%M:%S.%fZ')
-        ds['author'] = root.findtext('%(atom_ns)sauthor/%(atom_ns)sname' % NSs)
-        ds['uri'] = root.findtext('%(atom_ns)sauthor/%(atom_ns)suri' % NSs)
-        ds['method'] = root.findtext('%(atom_ns)stitle' % NSs)
+        ds['author'] = root.find(ATOM_NS+'author/'+ATOM_NS+'name').text
+        ds['uri'] = root.find(ATOM_NS+'author/'+ATOM_NS+'uri').text
+        ds['method'] = root.find(ATOM_NS+'title').text
         ds['args'] = []
         ds['dsid'] = None
 
-        for arg in root.findall('%(atom_ns)scategory' % NSs):
+        for arg in root.findall(ATOM_NS+'category'):
             scheme = arg.get('scheme').split(':',1)
             if scheme[0] == 'fedora-types':
                 r = {}
@@ -129,10 +125,13 @@ class IslandoraListener(ConnectionListener):
             elif scheme[0] == FEDORA_VERSION:
                 ds['fedora_version'] = arg.get('term')
 
-        #A little more concise version, instead of the five lines which did this...
-        ds['pid'] = root.findtext('%(atom_ns)ssummary' % NSs, None)
-        
-        ds['return'] = root.findtext('%(atom_ns)scontent' % NSs)
+        pid = root.find(ATOM_NS+'summary')
+        if pid == None:
+            ds['pid'] = None
+        else:
+            ds['pid'] = pid.text
+
+        ds['return'] = root.find(ATOM_NS+'content').text
 
         return ds
 
@@ -184,17 +183,10 @@ class IslandoraListener(ConnectionListener):
             # try to get fedora object, it could not exist
             try:
                 obj = self.client.getObject(pid)
-                logger.debug('Got object with PID: %s', pid)
-            except FedoraConnectionException as e:
-                if e.httpcode == 404: #The object doesn't exist in Fedora.
-                    obj = None
-                    logger.debug('Object with PID "%s" not found in Fedora.', pid)
-                else:
-                    #TODO: May want to do some other error handling (handle different error codes differently)?...  Or, to pass along the httpcode to the plugin somehow, and let it sort it out?
-                    obj = None
-                    logger.debug('Object with PID "%s" could not be accessed for some reason...', pid)
-
-            content_models = self._get_fedora_content_models(obj)
+                content_models = self._get_fedora_content_models(obj)
+            except FedoraConnectionException:
+                obj = None
+                content_models = []
 
             # add the content models to the message object for the plugin
             message['content_models'] = content_models
