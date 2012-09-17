@@ -62,7 +62,12 @@ class fjm(ILP):
                 else:
                     dsid = dsid + DSs[dsid]
                     DSs[dsid] += 1
-                FL.update_hashed_datastream_without_dup(obj, dsid, path.join(ir_ingest_dir, related_text), mimeType="application/pdf", checksumType='SHA-1')
+
+                pdf_path = path.join(ir_ingest_dir, related_text)
+                if path.exists(pdf_path):
+                    FL.update_hashed_datastream_without_dup(obj, dsid, pdf_path, mimeType="application/pdf", checksumType='SHA-1')
+                else:
+                    logger.warn('PDF does not exist where we expect it...  Let\'s keep on chugging.')
                 
                 #Get rid of the URL...
                 style = related_url
