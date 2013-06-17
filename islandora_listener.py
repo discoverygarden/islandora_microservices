@@ -83,7 +83,7 @@ class IslandoraListener(ConnectionListener):
         """
         \see ConnectionListener::on_connecting
         """
-        self.conn.connect(wait=True)
+        self.conn.connect(wait=True, headers={'client-id': 'digital.march.es'})
         
     def on_disconnected(self):
         """

@@ -6,3 +6,4 @@ dist
 *.pyc
 *.log
 islandora_microservices.egg-info/
+*.swp

@@ -30,6 +30,9 @@ class fjm(ILP):
                 CONV.create_thumbnail(obj, 'JPG', 'TN')
             elif message['dsid'] == 'MARCXML':
                 CONV.marcxml_to_mods(obj, 'MARCXML', 'MODS')
+            elif message['dsid'] == 'OBJ':
+                CONV.create_swf(obj, 'OBJ', 'SWF')
+                CONV.create_thumbnail(obj, 'OBJ', 'TN')
             elif message['dsid'] == 'ENDNOTE' and 'ENDNOTE' in obj and 'MODS' in obj:
                 self.__fix_ir_ingest(obj)
         elif message['method'] == 'ingest':
