@@ -12,7 +12,12 @@ from stomp.connect import Connection
 from stomp.listener import ConnectionListener
 from fcrepo.client import FedoraClient
 from fcrepo.utils import NS
-from stomp.exception import NotConnectedException, ReconnectFailedException
+from stomp.exception import NotConnectedException
+try:
+    from stomp.exception import ReconnectFailedException
+except ImportError:
+    # XXX: The exception was renamed in stomp.py...
+    from stomp.exception import ConnectFailedException as ReconnectFailedException
 from optparse import OptionParser
 from fcrepo.connection import FedoraConnectionException
 from plugin_manager import IslandoraListenerPlugin, IslandoraFilteredPluginManager, IslandoraPluginManager
