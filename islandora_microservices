@@ -6,57 +6,86 @@
 #
 #   Linux chkconfig stuff:
 #
-#   chkconfig: 2345 70 10
+#   chkconfig: 2345 80 05
 #   description: Startup/shutdown script for running Islandora Microservices.
 #
+#  03/01/2012 by avessey: Made to use 'su', so as to avoid the tty requirement of sudo  
+#
 # Source function library.
+. /etc/environment #Some variables may be defined here...
+. /etc/profile #Get BASH specific stuff (I use profile.d to add to the path for BASH)
 
 PROG="Islandora Microservices"
-#FIXME (minor):  Why not 
-PYTHON=/usr/bin/python
-MICROSERVICES_PATH=/mnt/fjm_obj/lib/fedora_microservices
+PYTHON=/usr/bin/python2.6
+MICROSERVICES_PATH=$FEDORA_HOME/microservices
 CONFIG_FILE=$MICROSERVICES_PATH/islandora_microservices.cfg
-LOCK_FILE=/var/lock/islandora_microservices
+#LOCK_FILE=$MICROSERVICES_PATH/microservices.lock
 # *** Please make sure you change the fedora user to reflect the local setup. ***t
-FEDORA_USER=root
+FEDORA_USER=fedora
+LISTENER_LINE="$PYTHON ./islandora_listener.py -C $CONFIG_FILE"
+LISTENER_LINE_ENVED="/usr/bin/screen -d -m /bin/env PATH=\"$PATH\" $LISTENER_LINE"
+SU_SHELL=/bin/sh
+
+START_STOP_WAIT=60
+FEDORA_SERVER_ADDRESS=localhost
+STOMP_PORT=61613
 
 start () {
 	echo -n "Starting $PROG: "
 	# check to see if the process is already running
-	if [ -f $LOCK_FILE ]; then
+	if pgrep -fx "$LISTENER_LINE" >/dev/null 2>&1; then
 		echo "$PROG is already running"
 	else
-			# start JMS as the fedora user
-      sudo -iu $FEDORA_USER $PYTHON $MICROSERVICES_PATH/islandora_listener.py -C $CONFIG_FILE & #> /dev/null #2>&1
-			sleep 3
-			ps -ef | grep 'islandora_listener' | grep -v 'grep' >/dev/null 2>&1
-			RETVAL=$?
-			if [ $RETVAL = 0 ]; then
-				touch $LOCK_FILE
-				echo "                                          [ \033[0;32m OK\033[0;39m""  ]"
-			else
-				echo "                                          [ \033[0;31m FAILED\033[0;39m""  ]"
+		startwait=$START_STOP_WAIT
+		count=0
+		## Check to make sure that activeMQ has started for $START_STOP_WAIT seconds
+		while [ $count -lt $startwait ]; do
+			echo -n "."
+			count=`expr $count + 1`
+			ACTIVEMQ_CHECK=`nmap -p$STOMP_PORT $FEDORA_SERVER_ADDRESS | grep $STOMP_PORT | awk '{ print $2 }'`
+			sleep 1
+			if [ $ACTIVEMQ_CHECK = "open" ]; then
+				sleep 10
+				break
 			fi
+		done
+		if [ $ACTIVEMQ_CHECK = "open" ]; then
+			# start JMS as the fedora user
+     			su --shell=$SU_SHELL --session-command="cd $MICROSERVICES_PATH && $LISTENER_LINE_ENVED &" $FEDORA_USER #> /dev/null #2>&1
+			sleep 3
+			if pgrep -fx "$LISTENER_LINE" >/dev/null 2>&1; then
+				#su --session-command="touch $LOCK_FILE" $FEDORA_USER
+				echo -e "                                          [ \033[0;32m OK\033[0;39m""  ]"
+			else
+				echo -e "                                          [ \033[0;31m FAILED\033[0;39m""  ]"
+			fi
+		else
+			echo "" ; echo "$PROG was unable to contact the ActiveMQ broker running at $FEDORA_SERVER_ADDRESS."
+			exit 1
 		fi
+	fi
 }
 
 stop () {
 	# stop daemon
 	echo -n "Stopping $PROG: "
 	# check to see if the process is running
-	if [ ! -f $LOCK_FILE ]; then
-		echo "$PROG is not running"
-	else
+	if pgrep -fx "$LISTENER_LINE" >/dev/null 2>&1; then
 		# use kill -2 to stop JMS.
-		sudo -u $FEDORA_USER kill `ps -ef | grep islandora_listener | grep -v grep | awk '{print $2}'` &>/dev/null
-		RETVAL=$?
-		echo "                                          [ \033[0;32m OK\033[0;39m""  ]"
-		[ $RETVAL = 0 ] && rm -f $LOCK_FILE
+		if su --shell=$SU_SHELL --session-command="pkill -fx \"$LISTENER_LINE\"" $FEDORA_USER &>/dev/null; then
+			echo -e "                                          [ \033[0;32m OK\033[0;39m""  ]"
+                        #su --session-command="rm -f $LOCK_FILE" $FEDORA_USER
+		else
+			echo -e "                                          [ \033[0;31m FAILED\033[0;39m""  ]"
+		fi
+	else
+		echo "$PROG is not running"
 	fi
 }
 
 restart() {
 	stop
+  sleep 2
 	start
 }
 
@@ -71,15 +100,15 @@ case $1 in
 		restart
 	;;
 	status)
-		if [ -f $LOCK_FILE ]; then
-			echo "$PROG (pid `ps -ef | grep 'fedora_listener' | grep -v 'grep' | awk '{print $2}'`) is running..."
+		if pgrep -fx "$LISTENER_LINE" >/dev/null 2>&1 ; then
+			echo "$PROG is running..."
 		else
 			echo "$PROG has not been started."
 		fi
 	;;
 	*)
 
-	echo $"Usage: $PROG {start|stop|restart|status}"
+	echo "Usage: $PROG {start|stop|restart|status}"
 	exit 3
 esac
 

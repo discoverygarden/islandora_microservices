@@ -1,6 +1,9 @@
+logs/
 /*.cfg
+config/*.cfg
 build
 dist
 *.pyc
 *.log
 islandora_microservices.egg-info/
+*.swp

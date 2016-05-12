@@ -5,6 +5,9 @@ port: 61613
 
 ; If we are disconnected from the messaging server we try to reconnect
 ; [tries] times waiting [wait] seconds between attempts
+; TODO:FIXME:  These values need to be used during the inital stomp
+;   connection attempt; defaults are not long enough, and so 'better'/
+;   longer values have been hardcoded.
 [Reconnect]
 tries: 5
 wait: 10

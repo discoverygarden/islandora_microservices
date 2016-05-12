@@ -12,7 +12,12 @@ from stomp.connect import Connection
 from stomp.listener import ConnectionListener
 from fcrepo.client import FedoraClient
 from fcrepo.utils import NS
-from stomp.exception import NotConnectedException, ReconnectFailedException
+from stomp.exception import NotConnectedException
+try:
+    from stomp.exception import ReconnectFailedException
+except ImportError:
+    # XXX: The exception was renamed in stomp.py...
+    from stomp.exception import ConnectFailedException as ReconnectFailedException
 from optparse import OptionParser
 from fcrepo.connection import FedoraConnectionException
 from plugin_manager import IslandoraListenerPlugin, IslandoraFilteredPluginManager, IslandoraPluginManager
@@ -47,7 +52,7 @@ class IslandoraListener(ConnectionListener):
         # connect to the fedora server
         try:
             logger.info("Connecting to Fedora server at %(url)s" % {'url': repository_url})
-            self.fc = fcrepo.connection.Connection(repository_url, username = repository_user, password = repository_pass)
+            self.fc = fcrepo.connection.Connection(repository_url, username = repository_user, password = repository_pass, persistent=False)
             self.client = FedoraClient(self.fc)
         except Exception,e:
             logger.error('Error while connecting to Fedora server %(url)s. Error: (%(error)s).' % {'url':repository_url, 'error':e})
@@ -83,7 +88,7 @@ class IslandoraListener(ConnectionListener):
         """
         \see ConnectionListener::on_connecting
         """
-        self.conn.connect(wait=True)
+        self.conn.connect(wait=True, headers={'client-id': 'digital.march.es'})
         
     def on_disconnected(self):
         """
@@ -97,25 +102,22 @@ class IslandoraListener(ConnectionListener):
     def _process_fedora_message(self, message):
         etree = ElementTree.ElementTree()
         root = ElementTree.XML(message)
-        ds = dict()
+        ds = {}
 
-        NSs = {
-            'atom_ns': "{http://www.w3.org/2005/Atom}",
-            'fedora_ns': "{http://www.fedora.info/definitions/1/0/types/}"
-        }
-
+        ATOM_NS = "{http://www.w3.org/2005/Atom}"
+        FEDORA_NS = "{http://www.fedora.info/definitions/1/0/types/}"
         FEDORA_VERSION = 'info:fedora/fedora-system:def/view#version'
 
-        ds['id'] = root.findtext('%(atom_ns)sid' % NSs)
-        updated = root.findtext('%(atom_ns)supdated' % NSs)
+        ds['id'] = root.find(ATOM_NS+'id').text
+        updated = root.find(ATOM_NS+'updated').text
         ds['updated'] = datetime.strptime(updated, '%Y-%m-%dT%H:%M:%S.%fZ')
-        ds['author'] = root.findtext('%(atom_ns)sauthor/%(atom_ns)sname' % NSs)
-        ds['uri'] = root.findtext('%(atom_ns)sauthor/%(atom_ns)suri' % NSs)
-        ds['method'] = root.findtext('%(atom_ns)stitle' % NSs)
+        ds['author'] = root.find(ATOM_NS+'author/'+ATOM_NS+'name').text
+        ds['uri'] = root.find(ATOM_NS+'author/'+ATOM_NS+'uri').text
+        ds['method'] = root.find(ATOM_NS+'title').text
         ds['args'] = []
         ds['dsid'] = None
 
-        for arg in root.findall('%(atom_ns)scategory' % NSs):
+        for arg in root.findall(ATOM_NS+'category'):
             scheme = arg.get('scheme').split(':',1)
             if scheme[0] == 'fedora-types':
                 r = {}
@@ -128,19 +130,27 @@ class IslandoraListener(ConnectionListener):
             elif scheme[0] == FEDORA_VERSION:
                 ds['fedora_version'] = arg.get('term')
 
-        #A little more concise version, instead of the five lines which did this...
-        ds['pid'] = root.findtext('%(atom_ns)ssummary' % NSs, None)
-        
-        ds['return'] = root.findtext('%(atom_ns)scontent' % NSs)
+        pid = root.find(ATOM_NS+'summary')
+        if pid == None:
+            ds['pid'] = None
+        else:
+            ds['pid'] = pid.text
+
+        ds['return'] = root.find(ATOM_NS+'content').text
 
         return ds
 
     def _get_fedora_content_models(self, obj):
+            content_models = []
+
             if obj != None and 'RELS-EXT' in obj:
                 ds = obj['RELS-EXT']
-                content_models = [elem['value'].split('/')[1] for elem in ds[NS.fedoramodel.hasModel]]
-            else:
-                content_models = []
+                for elem in ds[NS.fedoramodel.hasModel]:
+                    cm = elem['value'].split('/')
+                    try:
+                        content_models.append(cm[1])
+                    except IndexError:
+                        pass
 
             return content_models
 
@@ -152,7 +162,10 @@ class IslandoraListener(ConnectionListener):
 
         # pivot on the message type
         if headers['destination'] == ISLANDORA_TOPIC:
-            method = headers['method']
+            if 'method' in headers:
+                method = headers['method']
+            else:
+                method = None
 
             if method in islandora_methods:
                 plugin_set = islandora_methods['all'] | islandora_methods[method]
@@ -162,6 +175,7 @@ class IslandoraListener(ConnectionListener):
             for plugin in plugin_set:
                 try:
                     message = json.loads(body)
+                    plugin.plugin_object.stomp = self
                     plugin.plugin_object.islandoraMessage(method, message, self.client)
                 except:
                     logger.exception('Uncaught exception in plugin: %s!' % plugin.name)
@@ -174,17 +188,10 @@ class IslandoraListener(ConnectionListener):
             # try to get fedora object, it could not exist
             try:
                 obj = self.client.getObject(pid)
-                logger.debug('Got object with PID: %s', pid)
-            except FedoraConnectionException as e:
-                if e.httpcode == 404: #The object doesn't exist in Fedora.
-                    obj = None
-                    logger.debug('Object with PID "%s" not found in Fedora.', pid)
-                else:
-                    #TODO: May want to do some other error handling (handle different error codes differently)?...  Or, to pass along the httpcode to the plugin somehow, and let it sort it out?
-                    obj = None
-                    logger.debug('Object with PID "%s" could not be accessed for some reason...', pid)
-
-            content_models = self._get_fedora_content_models(obj)
+                content_models = self._get_fedora_content_models(obj)
+            except FedoraConnectionException:
+                obj = None
+                content_models = []
 
             # add the content models to the message object for the plugin
             message['content_models'] = content_models
@@ -200,6 +207,7 @@ class IslandoraListener(ConnectionListener):
 
             for plugin in (plugin_set_cm & plugin_set_methods):
                 try:
+                    logger.info('Processing PID: %(pid)s with plugin: %(plugin)s.' % {'pid' : pid, 'plugin' : plugin.name})
                     plugin.plugin_object.fedoraMessage(message, obj, self.client)
                 except:
                     logger.exception('Uncaught exception in plugin: %s!' % plugin.name)
@@ -213,22 +221,6 @@ class IslandoraListener(ConnectionListener):
         self.disconnect()
         os._exit(1)
 
-# broken code to retry on error, when we have an unstable server
-# i think its worth fixing this code, currently its hard to test because
-# this only happens sometimes
-#    def on_error(self, headers, body):
-#        """
-#        \see ConnectionListener::on_error
-#        """
-#        global disconnected_state
-#        disconnected_state = True
-#        logger.error("Error reported by Stomp. Trying to reconnect.")
-#        logger.error(body)
-#        logger.debug('here')
-#        self.conn.stop()
-#        logger.debug('there')
-#        signal.alarm(reconnect_wait)
-        
     def on_connected(self, headers, body):
         """
         \see ConnectionListener::on_connected
@@ -294,7 +286,7 @@ class IslandoraListener(ConnectionListener):
         except NotConnectedException:
             pass
     
-    def send(self, destination, correlation_id, message):
+    def send(self, destination, message, headers = {}):
         """
         Required Parametes:
             destination - where to send the message
@@ -303,7 +295,7 @@ class IslandoraListener(ConnectionListener):
         Description:
         Sends a message to a destination in the message system.
         """
-        self.conn.send(destination=destination, message=message, headers={'correlation-id': correlation_id})
+        self.conn.send(destination=destination, message=message, headers=headers)
         
     def subscribe(self, destination, ack='auto'):
         """
@@ -327,7 +319,7 @@ class IslandoraListener(ConnectionListener):
         Description:
             Remove an existing subscription - so that the client no longer receives messages from that destination.
         """
-        self.conn.unsubscribe(destination)
+        self.conn.unsubscribe(destination=destination)
 
     def connect(self):
         self.conn.start()
@@ -344,6 +336,7 @@ def alarm_handler(signum, frame):
 
             stomp_client.subscribe(ISLANDORA_TOPIC)
             stomp_client.subscribe(FEDORA_TOPIC)
+            logger.error("Reconnected!")
 
         except ReconnectFailedException:
             attempts = attempts + 1
@@ -353,17 +346,19 @@ def alarm_handler(signum, frame):
             else:
                 signal.alarm(reconnect_wait)
     else:
-        if stomp_client.conn.is_connected():
-            signal.alarm(POLLING_TIME)
-        else:
+        try:
+            if stomp_client.conn.is_connected():
+                signal.alarm(POLLING_TIME)
+            else:
+                logger.error("Disconnected from JMS (fedora down?). Shutting down.")
+                sys.exit(1)
+        except:
+            logger.error("Unexpected Error. Shutting down.")
             sys.exit(1)
         
-
-        
 def shutdown_handler(signum, frame):
-
-    stomp_client.disconnect();
-    sys.exit(0);
+    stomp_client.disconnect()
+    sys.exit(0)
 
 if __name__ == '__main__':
 
